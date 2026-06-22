@@ -15,19 +15,20 @@ from core import config as cfg
 from training.data_loader import canonicalize_columns, load_data
 
 
+# 基于中试数据实际分布设置（~3倍观测范围），用于检测传感器故障异常值
 NUMERIC_RANGES = {
-    "influent_flow": (0.0, 100000.0),
-    "influent_ph": (0.0, 14.0),
-    "conductivity": (0.0, 200000.0),
-    "influent_f": (0.0, 1000.0),
-    "effluent_f": (0.0, 1000.0),
-    "pacl_dose": (0.0, max(cfg.PACL_RANGE[1] * 5, cfg.PACL_RANGE[1])),
-    "defluor_dose": (0.0, max(cfg.DEFLUOR_RANGE[1] * 5, cfg.DEFLUOR_RANGE[1])),
-    "pacl_tank_ph": (0.0, 14.0),
-    "defluor_tank_ph": (0.0, 14.0),
-    "recycle_flow": (0.0, 100000.0),
-    "waste_flow": (0.0, 100000.0),
-    "pam_dose": (0.0, 1000.0),
+    "influent_flow": (5.0, 200.0),       # 中试 16-52 m3/h
+    "influent_ph": (4.0, 10.0),          # 中试 5.8-8.4
+    "conductivity": (300.0, 10000.0),    # 中试 1211-1924 μS/cm
+    "influent_f": (1.0, 50.0),           # 中试 4.0-25.2 mg/L
+    "effluent_f": (0.0, 5.0),            # 中试 0.6-2.87 mg/L
+    "pacl_dose": (0.0, 1500.0),          # 中试 70-240 mg/L
+    "defluor_dose": (0.0, 10.0),         # 中试 0.26-4.63 mL/L
+    "pacl_tank_ph": (4.0, 12.0),         # 中试 6.3-11.5
+    "defluor_tank_ph": (4.0, 9.0),       # 中试 5.9-7.0
+    "recycle_flow": (0.0, 2.0),          # 中试 0.26-0.40 m3/h
+    "waste_flow": (0.0, 10.0),           # 中试 2.30-2.55 m3/h
+    "pam_dose": (0.0, 10.0),             # 中试 3.77-4.0 mg/L
 }
 
 

@@ -1,5 +1,0 @@
-﻿#,问题,影响,代码位置,建议
-1,**TabPFN 每次启动都重新 fit**,大训练集时启动数分钟，服务不可用,"`inference_engine.py` `model.fit(data['X_train'], data['y_train'])`",训练后 `joblib.dump` 序列化，启动时直接加载
-2,**异步任务用 threading + 内存字典**,GIL 阻塞并发；重启丢失任务；内存泄漏,"`serve.py` `_task_store = {}` `threading.Thread(target=_run, daemon=True)`",改用 `ProcessPoolExecutor` + Redis/SQLite 持久化
-3,**predict\_batch 实质逐条调用 predict()**,1600 个候选重复特征工程 1600 次，优化极慢,`inference_engine.py` `return [self.predict(w) for w in water_samples]`,真正批量：一次 `transform` + 一次 `predict`
-4,**batch 超时是事后检查**,计算死循环时永不触发超时，请求挂死,`serve.py` `if result['elapsed_s'] > req.timeout`,用 `asyncio.wait_for` 或 `signal.alarm` 实现 preemptive timeout

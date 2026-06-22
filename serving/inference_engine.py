@@ -112,7 +112,7 @@ class InferenceEngine:
     # ── 预测 ──
 
     def _build_prediction_result(self, predicted: float, model_used="tabpfn",
-                                 warnings=None) -> dict:
+                                 warnings=None, low_confidence=False) -> dict:
         """统一构造预测结果。
 
         q95 是偏保守的上置信界；推荐逻辑主要看 q95 是否超过安全线/红线。
@@ -125,7 +125,7 @@ class InferenceEngine:
         else:
             risk = RiskLevel.DANGER
         std_final = self.residual_std * 2 if risk == RiskLevel.DANGER else self.residual_std
-        return {
+        result = {
             "predicted_f": round(predicted, 4),
             "q05": max(0, predicted - 1.645 * std_final),
             "q95": predicted + 1.645 * std_final,
@@ -133,6 +133,10 @@ class InferenceEngine:
             "model_used": model_used,
             "warnings": warnings or [],
         }
+        if low_confidence:
+            result["low_confidence"] = True
+            result["warnings"].append("历史数据不足，滞后/滚动特征部分由训练集中位数填充，预测置信度偏低")
+        return result
 
     def predict(self, water_quality: dict, history=None) -> dict:
         """单次推理。
@@ -152,15 +156,16 @@ class InferenceEngine:
             df = pd.concat([history, new_row], ignore_index=True) if history is not None else new_row
             horizon = self.engineer.prediction_horizon_steps()
             if horizon > 0:
-                # 为了预测“当前运行状态经过 HRT 后的出水”，这里把当前水质复制到未来 horizon 行。
-                # 经过 _delay_series shift 后，最后一行特征会对应当前投加/进水对未来出水的影响。
                 future = pd.DataFrame([water_quality] * horizon)
                 df = pd.concat([df, future], ignore_index=True)
             window_rows = self.engineer.min_history * 2 + horizon
+            # 历史不足时标记低置信度：lag 特征超过可用历史的部分由训练集中位数填充
+            min_reliable = max(cfg.LAG_STEPS) + max(cfg.ROLLING_WINDOWS) + horizon
+            low_conf = len(df) < min_reliable
             df_feat = self.engineer.transform(df.iloc[-window_rows:])
             X = df_feat.iloc[[-1]].reindex(columns=self.feature_names, fill_value=0)
             y_pred = self.model.predict(X.values.astype(np.float32))
-            return self._build_prediction_result(float(y_pred[0]))
+            return self._build_prediction_result(float(y_pred[0]), low_confidence=low_conf)
         except Exception as e:
             # 异常时先试用 XGBoost（无条件，与主路径一致），再尝试规则兜底（需开关）
             if self.backup_model is not None:

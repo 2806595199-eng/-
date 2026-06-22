@@ -158,6 +158,8 @@ class FeedbackInput(BaseModel):
     record_id: Optional[str] = Field(None, description="关联的推荐 record_id（同步模式）")
     effluent_f: float = Field(..., ge=0, le=10, description="实测出水氟浓度 mg/L")
     timestamp: Optional[str] = Field(None, description="采样时间 ISO 8601")
+    executed_pacl_dose: Optional[float] = Field(None, ge=0, description="实际执行的PAC投加量 mg/L")
+    executed_defluor_dose: Optional[float] = Field(None, ge=0, description="实际执行的除氟剂投加量 mL/L")
 
 
 class FeedbackUpdateReq(BaseModel):

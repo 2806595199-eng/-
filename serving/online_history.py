@@ -80,12 +80,19 @@ def record_feedback(feedback: Dict[str, Any],
     """记录一次人工/仪表反馈的实际出水氟。
 
     推荐用 record_id 关联历史预测/推荐记录；如果没有 record_id，也可以直接上传完整输入字段加 effluent_f。
+    支持 executed_pacl_dose / executed_defluor_dose 记录实际执行加药量，
+    以区分"推荐值"与"实际值"，避免运维未按推荐执行时训练错误关系。
     """
     payload = dict(feedback)
     payload.setdefault("feedback_id", uuid4().hex)
     payload.setdefault("created_at", _now_iso())
     if "effluent_f" not in payload:
         raise ValueError("feedback must include effluent_f")
+    # 保留推荐与实际的区分：训练时优先用 executed_dose，回退到推荐值
+    if "executed_pacl_dose" not in payload and "pacl_dose" in payload:
+        payload["executed_pacl_dose"] = payload["pacl_dose"]
+    if "executed_defluor_dose" not in payload and "defluor_dose" in payload:
+        payload["executed_defluor_dose"] = payload["defluor_dose"]
     _append_jsonl(Path(history_dir) / FEEDBACK_FILE, payload)
     return payload
 

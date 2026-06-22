@@ -17,9 +17,9 @@ def _valid_rows():
         "defluor_dose": 0.5,
         "pacl_tank_ph": 7.0,
         "defluor_tank_ph": 6.0,
-        "recycle_flow": 4.0,
-        "waste_flow": 15.0,
-        "pam_dose": 0.5,
+        "recycle_flow": 0.3,
+        "waste_flow": 2.5,
+        "pam_dose": 3.8,
         "effluent_f": 0.7,
     }
     rows = []

@@ -1,0 +1,15 @@
+﻿#,问题,影响,代码位置,建议
+1,**特征维度 300+，超 TabPFN 舒适区**,泛化下降，精度不稳定,`feature_engineer.py` lag/rolling/派生变量展开,XGBoost importance 或 PCA 降至 50-100 维
+2,**数值范围校验过宽**,传感器故障异常值无法检测,`data_quality.py` `NUMERIC_RANGES`,按中试数据分布收紧（如 flow: 10-25）
+3,"**模型更新要求""优于当前""**",长期不更新，模型过时,`model_update.py` `require_better_than_active=True`,添加 30 天强制更新机制
+4,**日志/历史文件无限增长**,磁盘撑满，I/O 瓶颈,`online_history.py` JSONL 追加；`logger.py` 全量,大小轮转（100MB）+ 采样率配置
+5,**无 A/B 测试 / 灰度 / 回滚**,新模型风险不可控,`model_registry.py` 直接覆盖 active,Shadow mode → 灰度 → 自动回滚
+6,**serve.py 路由业务混写臃肿**,维护难，测试难写,`serve.py` 150 行混写 6 个路由+逻辑,"拆分为 `api/schemas.py`, `api/routes/*.py`"
+7,**频率限制取代理 IP**,Nginx 后限流失效,`serve.py` `request.client.host`,读 `X-Forwarded-For` 或按 API Key 限流
+8,**horizon 处理用当前值复制填充**,未来变化未考虑，时序特征失真,`inference_engine.py` `pd.DataFrame([water_quality] * horizon)`,用历史同期均值或趋势外推
+9,**lag 头部缺失用中位数兜底**,前 5 个样本 lag 特征完全人造,`feature_engineer.py` `ffill() + fill_values`,标记低置信度或要求最小历史长度
+10,**rolling min\_periods 过小**,边界处噪声大，特征质量低,"`feature_engineer.py` `min_periods=max(2, w//2)`",`min_periods=w` 或标记不完整窗口
+11,**置信区间基于正态假设**,非正态残差下判断失误,`inference_engine.py` `predicted + 1.645 * std`,分位数回归或 Bootstrap
+12,**反馈匹配容差仅 1 个采样间隔**,时间戳偏差时匹配失败,`online_history.py` `tolerance = 10min`,放宽至 2-3 个间隔，或支持手动关联
+13,**未记录实际执行加药量**,运维未按推荐执行时训练错误关系,`serve.py` `record_runtime_event` 只记推荐值,添加 `executed_dose` 字段区分推荐/实际
+14,**control/ 目录空置，无 PLC 下发**,推荐到执行断点，无真正闭环,`control/__init__.py` (空),实现 snap7/pymodbus PLC 写入接口
