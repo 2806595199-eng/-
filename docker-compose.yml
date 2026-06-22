@@ -22,6 +22,19 @@ services:
       NUMEXPR_NUM_THREADS: "${CPU_THREADS:-4}"
     command: uvicorn serve:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "4"
+        reservations:
+          memory: 1G
+          cpus: "1"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-c", "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8000/api/v1/ready', timeout=5)); sys.exit(0 if data.get('status') == 'ready' else 1)"]
       interval: 30s

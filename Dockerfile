@@ -1,8 +1,20 @@
+# ── 构建阶段 ──
+FROM python:3.11-slim AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --target=/install -r /tmp/requirements.txt
+
+
+# ── 运行阶段 ──
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PYTHONPATH=/app
 ENV ONLINE_HISTORY_DIR=/app/data/online
 ENV TABPFN_MODEL_CACHE_DIR=/app/models/tabpfn_cache
@@ -14,13 +26,7 @@ ENV NUMEXPR_NUM_THREADS=4
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/requirements.txt
+COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
 COPY . /app
 
