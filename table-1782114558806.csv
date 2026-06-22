@@ -1,9 +1,0 @@
-﻿#,问题,影响,代码位置,建议
-1,健康检查用 Python 脚本,容器启动等待增加,`docker-compose.yml` `python -c`,改用 `curl`
-2,API 文档隐藏 predict/recommend,甲方无法 Swagger 查看,`serve.py` `include_in_schema=False`,开放文档或内外分离
-3,无运行时日志级别调整,排查问题需重启,`logger.py` 硬编码级别,API 或信号动态调整
-4,`_rolling_slope` 用 Python apply,大数据量特征工程慢,"`feature_engineer.py` `.apply(_slope, raw=True)`",numpy 向量化或 `.cov()`
-5,Docker 单容器运行全部,推理卡死 API 也挂,`docker-compose.yml` 单 service,拆 api/worker/scheduler
-6,requirements.txt 未读取到,无法审计依赖安全,`Dockerfile` `COPY requirements.txt`,确认存在并固定版本号
-7,日志 context 字段无限扩展,可能泄漏敏感信息,`logger.py` `for key in (...)` 无白名单,添加允许字段白名单
-8,三种优化模式冗余计算,无论选哪种都算三种,`optimizer.py` 同时算 eco/bal/saf,按需计算或缓存复用

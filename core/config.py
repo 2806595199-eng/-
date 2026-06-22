@@ -71,7 +71,7 @@ DEFLUOR_DENSITY_KG_L = 1.4       # TODO: 推定值，待甲方确认
 DEFLUOR_STOCK_MASS_FRACTION = 0.15  # 中试原始数据：除氟剂（15%溶液）
 MAGNETIC_LOSS_RATE = 0.02        # TODO: 磁粉回收损耗率 待确认
 INCLUDE_FIXED_CHEMICAL_COSTS = False
-DEFAULT_PAM_DOSE_MG_L = 0.5
+DEFAULT_PAM_DOSE_MG_L = 4.0  # 中试实测 3.77-4.0 mg/L（0.1-0.15‰溶液）
 DEFAULT_MAGNETIC_DOSE_G_L = 0.15
 
 # PAC 投加量单位（中试原始数据：PAC(10%溶液））
