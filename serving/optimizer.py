@@ -232,8 +232,7 @@ class GridSearchDosingOptimizer:
         bal = self._select_balanced(candidates)
         saf = self._select_safe(candidates)
 
-        # 用主模型（TabPFN）重新预测三个候选，确保时序特征生效。
-        # 人工 review 时重点看这里：XGBoost 只负责快速粗筛，最终输出前必须经过主模型复核。
+        # 用主模型（TabPFN）重新预测三个 XGBoost 初选候选，确保最终输出经过了主模型复核。
         risk_order = {"safe": 0, "warning": 1, "danger": 2}
         for sel in (eco, bal, saf):
             wq_sel = {**water_quality,
@@ -249,31 +248,41 @@ class GridSearchDosingOptimizer:
                 "model_used": validated_model,
             }
             sel["model_used"] = validated_model
-            sel["selection_reason"] += f" ({validated_model} validated)"
 
-        # TabPFN 验完后重新排序：
-        # 如果原推荐被主模型判为 danger，而备选方案风险更低，则优先推荐风险更低的方案。
-        # 这一步是为了避免“粗筛模型觉得便宜可行，但主模型认为有超标风险”的情况。
-        if mode == "economic":
-            recommended = eco
-        elif mode == "safe":
-            recommended = saf
-        else:
-            recommended = bal
+        # TabPFN 验完后按模式约束重新选择：
+        # 按模式确定初选，然后用 TabPFN 验证后的 q95 复核约束
+        mode_map = {"economic": eco, "balanced": bal, "safe": saf}
+        recommended = mode_map[mode]
+        all_three = [eco, bal, saf]
 
-        # 如果推荐方案被 TabPFN 判为 danger，检查备选方案是否有更好的
-        if risk_order.get(recommended["prediction"]["risk_level"], 9) > 0:
-            for alt in (eco, bal, saf):
+        def _q95_ok(c, m):
+            q = c["prediction"]["q95"]
+            limit = cfg.TARGET_F if m == "safe" else cfg.LIMIT_F
+            return q <= limit
+
+        # 如果模式初选不满足约束，从所有备选中挑满足约束的最便宜方案
+        if not _q95_ok(recommended, mode):
+            candidates_ok = [c for c in all_three if _q95_ok(c, mode)]
+            if candidates_ok:
+                recommended = min(candidates_ok, key=lambda c: c["cost"]["total_yuan_per_ton"])
+                recommended["selection_reason"] += " (re-ranked, q95 ok)"
+            else:
+                # 都不达标，挑 q95 最低的
+                recommended = min(all_three, key=lambda c: c["prediction"]["q95"])
+                recommended["selection_reason"] += " (all exceed, min q95)"
+
+        # 风险优化：若推荐方案不达标或风险偏高，从备选中选更好的
+        rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
+        if rec_risk > 0:
+            for alt in all_three:
                 if alt is recommended:
                     continue
                 alt_risk = risk_order.get(alt["prediction"]["risk_level"], 9)
-                rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
                 if alt_risk < rec_risk or (alt_risk == rec_risk and
                    alt["cost"]["total_yuan_per_ton"] < recommended["cost"]["total_yuan_per_ton"]):
-                    model_label = alt.get("model_used", "model")
-                    alt["selection_reason"] += f" ({model_label} re-ranked, lower risk)"
+                    rec_risk = alt_risk
+                    alt["selection_reason"] += " (re-ranked)"
                     recommended = alt
-                    break
 
         # 构造统一输出
         def _format(c, label):

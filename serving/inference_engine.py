@@ -162,13 +162,14 @@ class InferenceEngine:
             y_pred = self.model.predict(X.values.astype(np.float32))
             return self._build_prediction_result(float(y_pred[0]))
         except Exception as e:
+            # 异常时先试用 XGBoost（无条件，与主路径一致），再尝试规则兜底（需开关）
+            if self.backup_model is not None:
+                print(f"[Warning] TabPFN failed: {e}, using XGBoost")
+                return self._xgb_predict_result(
+                    water_quality,
+                    warnings=[f"TabPFN failed, using XGBoost: {e}"],
+                )
             if cfg.ALLOW_FALLBACK_PREDICTION:
-                if self.backup_model is not None:
-                    print(f"[Warning] TabPFN failed: {e}, using XGBoost")
-                    return self._xgb_predict_result(
-                        water_quality,
-                        warnings=[f"TabPFN failed, using XGBoost: {e}"],
-                    )
                 return self._fallback_rule(water_quality)
             raise RuntimeError(f"预测失败: {e}") from e
 

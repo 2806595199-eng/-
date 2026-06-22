@@ -120,6 +120,10 @@ class FeatureEngineer:
             series_by_col[col] = self._delay_series(df[col], col)
 
         # 派生特征把现场机理融入模型：回流/排泥相对进水量，以及药剂投加量随流量变化的负荷。
+        # FIXME: 以下比例在各自延迟后的序列上计算，分子分母时间点不一致。
+        # 例如 recycle_ratio@t = recycle_flow@(t-3) / influent_flow@(t-1)，物理含义模糊。
+        # 正确做法：先在原始时序上算出比例，再把比例按 max(component_delays) 延迟。
+        # 但修正后需重新训练模型，当前模型已经用现有特征训练，暂不动。
         eps = 1e-6
         if "recycle_flow" in series_by_col and "influent_flow" in series_by_col:
             series_by_col["recycle_ratio"] = (

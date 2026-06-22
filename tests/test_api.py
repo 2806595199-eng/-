@@ -91,8 +91,7 @@ def test_health(client):
     d = r.json()
     assert "status" in d
     assert "model_loaded" in d
-    assert "main_model_fitted" in d
-    assert "backup_model_loaded" in d
+    assert "uptime" in d
 
 
 def test_ready_reports_model_readiness(client):
@@ -122,7 +121,7 @@ def test_predict(client):
         "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
         "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5,
         "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-        "waste_flow": 15, "pam_dose": 0.5,
+        "waste_flow": 2.5, "pam_dose": 0.5,
     })
     assert r.status_code == 200
     d = r.json()
@@ -138,7 +137,7 @@ def test_predict_no_effluent_f(client):
         "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
         "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5,
         "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-        "waste_flow": 15, "pam_dose": 0.5, "effluent_f": 1.5,
+        "waste_flow": 2.5, "pam_dose": 0.5, "effluent_f": 1.5,
     })
     assert r.status_code == 200
 
@@ -150,7 +149,7 @@ def test_recommend(client):
             "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
             "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5,
             "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-            "waste_flow": 15, "pam_dose": 0.5,
+            "waste_flow": 2.5, "pam_dose": 0.5,
         }
     })
     assert r.status_code == 200
@@ -178,7 +177,7 @@ def test_batch_recommend(client):
     d = r.json()
     assert "pacl_dose_setpoint" in d
     assert "defluor_dose_setpoint" in d
-    assert "history_records" in d
+    assert "based_on_records" in d
 
 
 def test_recommend_feedback_training_row_uses_recommended_doses(client, tmp_path, monkeypatch):
@@ -190,7 +189,7 @@ def test_recommend_feedback_training_row_uses_recommended_doses(client, tmp_path
             "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
             "influent_f": 18, "pacl_dose": 100, "defluor_dose": 0.1,
             "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-            "waste_flow": 15, "pam_dose": 0.5,
+            "waste_flow": 2.5, "pam_dose": 0.5,
         }
     })
     assert r.status_code == 200
@@ -242,7 +241,7 @@ def test_feedback_endpoint_records_effluent(client, tmp_path, monkeypatch):
         "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
         "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5,
         "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-        "waste_flow": 15, "pam_dose": 0.5,
+        "waste_flow": 2.5, "pam_dose": 0.5,
         "effluent_f": 0.72,
     })
 
@@ -256,7 +255,7 @@ def test_history_status_endpoint(client, tmp_path, monkeypatch):
         "influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
         "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5,
         "pacl_tank_ph": 7, "defluor_tank_ph": 6, "recycle_flow": 4,
-        "waste_flow": 15, "pam_dose": 0.5,
+        "waste_flow": 2.5, "pam_dose": 0.5,
         "effluent_f": 0.72,
     })
 
