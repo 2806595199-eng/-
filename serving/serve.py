@@ -9,6 +9,7 @@ API:
 """
 
 import sys, os, time, argparse, json, inspect, uuid, threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field, ValidationError
@@ -346,15 +347,18 @@ def dose_recommend_batch(req: BatchReq, request: Request):
         return {"request_id": task_id, "status": "pending",
                 "poll_url": f"/api/v1/task/{task_id}"}
 
-    # 同步模式
-    try:
-        result = _do_batch_compute(req.records, req.mode)
-    except Exception as e:
-        logger.error(f"batch compute failed: {e}")
-        raise HTTPException(status_code=500, detail="模型计算异常，请使用上次推荐值")
-
-    if result["elapsed_s"] > req.timeout:
-        raise HTTPException(status_code=504, detail=f"计算超时（>{req.timeout}s），请使用备用策略")
+    # 同步模式：用线程池 + 超时实现抢占式终止
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_do_batch_compute, req.records, req.mode)
+        try:
+            result = future.result(timeout=req.timeout)
+        except FutureTimeoutError:
+            future.cancel()
+            raise HTTPException(status_code=504,
+                detail=f"计算超时（>{req.timeout}s），请使用备用策略或减少记录数")
+        except Exception as e:
+            logger.error(f"batch compute failed: {e}")
+            raise HTTPException(status_code=500, detail="模型计算异常，请使用上次推荐值")
 
     result["record_id"] = uuid.uuid4().hex[:16]
     return result

@@ -189,7 +189,15 @@ class InferenceEngine:
             return [self._build_prediction_result(float(p), model_used="xgboost")
                     for p in preds]
 
-        # 默认主模型，逐条预测（避免特征串扰）
+        # 主模型批量：XGBoost 特征 + TabPFN 预测，避免逐条重复特征工程
+        if len(water_samples) > 1 and self.model is not None:
+            try:
+                feats = np.array([self._build_simple_features(w) for w in water_samples])
+                y_preds = self.model.predict(feats.astype(np.float32))
+                return [self._build_prediction_result(float(p), model_used="tabpfn")
+                        for p in y_preds]
+            except Exception:
+                pass
         return [self.predict(w) for w in water_samples]
 
     # ── 备用 ──
