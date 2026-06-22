@@ -28,7 +28,7 @@ Swagger 文档：`http://localhost:8000/docs`
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | MODEL_DEVICE | auto | cpu / cuda |
-| USE_BACKUP | true | true 时用 XGBoost 快速启动 |
+| USE_BACKUP | false | false=TabPFN 主模型；true=XGBoost 替代（CPU 应急） |
 | CPU_THREADS | 4 | CPU 线程数 |
 | ALLOWED_ORIGINS | localhost:3000 | CORS 白名单（逗号分隔） |
 
