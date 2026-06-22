@@ -1,0 +1,43 @@
+{
+  "source_file": "净氟生态舱中试试验数据记录表.xlsx",
+  "rows": {
+    "candidate_columns": 40,
+    "expanded": 40,
+    "strict": 6
+  },
+  "effluent_f_source_counts": {
+    "old_meter": 23,
+    "new_meter": 17
+  },
+  "effluent_quality_flag_counts": {
+    "ok": 35,
+    "estimated_or_fault": 3,
+    "ambiguous_parentheses": 2
+  },
+  "missing_counts": {
+    "influent_flow": 0,
+    "influent_ph": 1,
+    "conductivity": 6,
+    "influent_f": 0,
+    "pacl_dose": 2,
+    "defluor_dose": 5,
+    "pacl_tank_ph": 0,
+    "defluor_tank_ph": 0,
+    "recycle_flow": 21,
+    "waste_flow": 24,
+    "pam_dose": 8,
+    "effluent_f": 0
+  },
+  "notes": [
+    "expanded keeps all rows with a numeric effluent_f target, using new meter first and old meter as fallback",
+    "strict keeps only new-meter rows with ok quality and complete required model fields",
+    "pacl_dose uses PAC ppm row; non-numeric dose text such as no-dosing is treated as 0",
+    "defluor_dose is converted from dosing pump ml/min to mL/L of 15% stock solution",
+    "pilot workbook columns are already batch-paired, so row-based HRT delay should not be applied blindly"
+  ],
+  "outputs": {
+    "expanded_csv": "data\\prepared\\pilot_expanded.csv",
+    "strict_csv": "data\\prepared\\pilot_strict.csv",
+    "quality_report_json": "data\\prepared\\pilot_quality_report.json"
+  }
+}

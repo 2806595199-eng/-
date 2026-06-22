@@ -1,0 +1,30 @@
+services:
+  defluor-api:
+    build: .
+    container_name: defluor-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+      ONLINE_HISTORY_DIR: "${ONLINE_HISTORY_DIR:-/app/data/online}"
+      TABPFN_MODEL_CACHE_DIR: "${TABPFN_MODEL_CACHE_DIR:-/app/models/tabpfn_cache}"
+      MODEL_DEVICE: "${MODEL_DEVICE:-cpu}"
+      USE_BACKUP: "${USE_BACKUP:-true}"
+      OMP_NUM_THREADS: "${CPU_THREADS:-4}"
+      OPENBLAS_NUM_THREADS: "${CPU_THREADS:-4}"
+      MKL_NUM_THREADS: "${CPU_THREADS:-4}"
+      NUMEXPR_NUM_THREADS: "${CPU_THREADS:-4}"
+    command: uvicorn serve:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8000/api/v1/ready', timeout=5)); sys.exit(0 if data.get('status') == 'ready' else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
