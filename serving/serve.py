@@ -170,8 +170,8 @@ class FeedbackUpdateReq(BaseModel):
 
 
 class BatchReq(BaseModel):
-    records: list[dict] = Field(..., min_length=1, max_length=100,
-        description="水质记录列表（最早→最新）， 1-100 条")
+    records: list[dict] = Field(..., min_length=10, max_length=100,
+        description="水质记录列表（最早→最新），至少10条以保证时序特征可靠")
     mode: str = Field("balanced", description="safe / economic / balanced")
     timeout: int = Field(10, ge=1, le=30, description="超时秒数，默认10，最大30")
     async_mode: bool = Field(False, description="true 时异步返回 request_id，通过 GET /task/{id} 查结果")
@@ -241,7 +241,7 @@ def _do_batch_compute(records: list, mode: str) -> dict:
         "predicted_f": rec["predicted_f"],
         "risk_level": rec["risk_level"],
         "effluent_limit": cfg.LIMIT_F,
-        "safety_margin": round(cfg.LIMIT_F - rec["predicted_f"], 3),
+        "safety_margin": round(cfg.LIMIT_F - rec.get("q95", rec["predicted_f"]), 3),
         "mode": mode,
         "based_on_records": len(records),
         "elapsed_s": elapsed,

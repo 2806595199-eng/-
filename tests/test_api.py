@@ -166,12 +166,11 @@ def test_recommend(client):
 
 
 def test_batch_recommend(client):
+    base = {"influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
+            "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5}
     r = client.post("/api/v1/dose/recommend/batch", json={
         "mode": "balanced",
-        "records": [
-            {"influent_flow": 100, "influent_ph": 7.2, "conductivity": 6500,
-             "influent_f": 18, "pacl_dose": 500, "defluor_dose": 0.5}
-        ]
+        "records": [dict(base, timestamp=f"2025-01-01 10:{i:02d}:00") for i in range(10)]
     })
     assert r.status_code == 200
     d = r.json()

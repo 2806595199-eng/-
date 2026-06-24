@@ -115,6 +115,10 @@ class HistoryRecordingEngine(FakeEngine):
         self.histories.append(history)
         return super().predict(wq)
 
+    def predict_batch(self, samples, prefer_model=None, history=None):
+        self.histories.append(history)
+        return super().predict_batch(samples, prefer_model, history)
+
 
 @pytest.fixture
 def water():

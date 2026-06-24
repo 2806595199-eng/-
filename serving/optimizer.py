@@ -227,74 +227,42 @@ class GridSearchDosingOptimizer:
         candidates, min_c, max_c = self._evaluate(water_quality, engine, history=history)
         flow = water_quality.get("influent_flow", 0)
 
+        # 全量 TabPFN 已对 1600 候选完成预测，直接从候选池按模式约束选最优
         risk_order = {"safe": 0, "warning": 1, "danger": 2}
 
-        # 三种模式 XGBoost 初选
-        eco = self._select_economic(candidates)
-        bal = self._select_balanced(candidates)
-        saf = self._select_safe(candidates)
-
-        # 收集 top N 候选：三种模式最优 + 成本最低 + q95 最低，去重
-        top_pool = {id(c): c for c in (eco, bal, saf)}
-        by_cost = sorted(candidates, key=lambda c: c["cost"]["total_yuan_per_ton"])
-        by_q95 = sorted(candidates, key=lambda c: c["prediction"]["q95"])
-        for c in by_cost[:cfg.TABPFN_VALIDATE_TOP_N // 2]:
-            top_pool[id(c)] = c
-        for c in by_q95[:cfg.TABPFN_VALIDATE_TOP_N // 2]:
-            top_pool[id(c)] = c
-        for c in top_pool.values():
-            c.setdefault("selection_reason", "top_n_candidate")
-            c.setdefault("warnings", [])
-        validated_pool = list(top_pool.values())
-
-        # 用主模型（TabPFN）验证 top N 候选，确保最终输出经过了主模型复核。
-        for sel in validated_pool:
-            wq_sel = {**water_quality,
-                      "pacl_dose": sel["recipe"].pacl_dose_setpoint,
-                      "defluor_dose": sel["recipe"].defluor_dose_setpoint}
-            tabpfn_pred = self._predict_validated(engine, wq_sel, history=history)
-            validated_model = tabpfn_pred.get("model_used", "unknown")
-            sel["prediction"] = {
-                "predicted_f": tabpfn_pred["predicted_f"],
-                "q05": tabpfn_pred["q05"],
-                "q95": tabpfn_pred["q95"],
-                "risk_level": tabpfn_pred["risk_level"],
-                "model_used": validated_model,
-            }
-            sel["model_used"] = validated_model
-
-        # TabPFN 验完后从验证池按模式约束重新选择——不再信赖 XGBoost 初选
         def _q95_ok(c, m):
             q = c["prediction"]["q95"]
             limit = cfg.TARGET_F if m == "safe" else cfg.LIMIT_F
             return q <= limit
 
+        # 三种模式分别从全量候选中选取
+        eco = self._select_economic(candidates)
+        bal = self._select_balanced(candidates)
+        saf = self._select_safe(candidates)
+
         mode_picks = {"economic": eco, "balanced": bal, "safe": saf}
         recommended = mode_picks[mode]
 
-        # 优先保留模式初选；仅当其不满足约束时从验证池中替换
+        # 模式初选不满足约束时，从全量候选中重选
         if not _q95_ok(recommended, mode):
-            constrained = [c for c in validated_pool if _q95_ok(c, mode)]
+            constrained = [c for c in candidates if _q95_ok(c, mode)]
             if constrained:
                 recommended = min(constrained, key=lambda c: c["cost"]["total_yuan_per_ton"])
-                recommended["selection_reason"] += " (re-ranked, q95 ok)"
             else:
-                recommended = min(validated_pool, key=lambda c: c["prediction"]["q95"])
-                recommended["selection_reason"] += " (all exceed, min q95)"
-        elif "selection_reason" not in recommended or not recommended.get("selection_reason"):
-            recommended["selection_reason"] = f"{mode}_selected"
+                recommended = min(candidates, key=lambda c: c["prediction"]["q95"])
+                recommended.setdefault("warnings", []).append(
+                    "所有候选方案均存在超标风险，建议人工介入")
 
-        # 风险优化：从完整验证池中找风险更低且更便宜的
+        # 风险管理：若推荐方案非 safe，检查其余模式选出的方案是否更好
         rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
         if rec_risk > 0:
-            for alt in validated_pool:
+            for alt in (eco, bal, saf):
                 if alt is recommended:
                     continue
                 alt_risk = risk_order.get(alt["prediction"]["risk_level"], 9)
                 if alt_risk < rec_risk or (alt_risk == rec_risk and
                    alt["cost"]["total_yuan_per_ton"] < recommended["cost"]["total_yuan_per_ton"]):
                     rec_risk = alt_risk
-                    alt["selection_reason"] += " (re-ranked)"
                     recommended = alt
 
         # 构造统一输出

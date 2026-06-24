@@ -225,9 +225,9 @@ class InferenceEngine:
                 y_preds = self.model.predict(X)
                 return [self._build_prediction_result(float(p), model_used="tabpfn")
                         for p in y_preds]
-            except Exception:
-                pass
-        return [self.predict(w) for w in water_samples]
+            except Exception as e:
+                print(f"[Warning] batch TabPFN failed: {e}, falling back to per-sample")
+        return [self.predict(w, history=history) for w in water_samples]
 
     # ── 备用 ──
 
