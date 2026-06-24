@@ -17,3 +17,4 @@ models/
 ~$*
 _tmp*
 中试数据处理包/
+api_records_*.json

@@ -201,49 +201,7 @@ class InferenceEngine:
                      residual_std_override=self.xgb_residual_std)
                     for p in preds]
 
-        # 主模型批量：历史特征一次计算，候选剂量只替换最后一行特征的差异列
-        if len(water_samples) > 1 and self.model is not None and self.engineer is not None:
-            try:
-                # 用 history 构建一次完整特征矩阵（包含所有滞后/滚动/派生特征）
-                if history is not None and len(history) > 0:
-                    horizon = self.engineer.prediction_horizon_steps()
-                    window_rows = self.engineer.min_history * 2 + horizon
-                    # 先用最后一条 history 填 horizon，构建基础特征矩阵
-                    last_wq = history.iloc[-1].to_dict()
-                    future = pd.DataFrame([last_wq] * (horizon + 1))
-                    df_base = pd.concat([history, future], ignore_index=True)
-                    feat_base = self.engineer.transform(df_base.iloc[-window_rows:])
-                    base_vec = feat_base.iloc[-1].values  # 基础特征行（用历史最后一条的剂量）
-                else:
-                    return [self.predict(w, history=history) for w in water_samples]
-
-                # 识别候选剂量相关列：pacl_dose / defluor_dose 及其派生特征
-                dose_cols = [c for c in feat_base.columns
-                             if 'pacl_dose' in c or 'defluor_dose' in c
-                             or 'pacl_mass' in c or 'defluor_mass' in c]
-
-                # 为每个候选构建特征行：复制基础特征，替换剂量相关列为候选值
-                feat_rows = []
-                for wq in water_samples:
-                    vec = base_vec.copy()
-                    # 用候选剂量重建一行的特征 → 只改剂量相关列
-                    tmp_df = pd.concat([history, pd.DataFrame([wq])], ignore_index=True)
-                    tmp_horizon = pd.DataFrame([wq] * (horizon + 1))
-                    tmp_full = pd.concat([history, tmp_horizon], ignore_index=True)
-                    tmp_feat = self.engineer.transform(tmp_full.iloc[-window_rows:])
-                    candidate_vec = tmp_feat.iloc[-1].values
-                    # 只取候选诊断相关列，其余保留基础特征
-                    for j, col in enumerate(feat_base.columns):
-                        if col in dose_cols:
-                            vec[j] = candidate_vec[j]
-                    feat_rows.append(vec)
-
-                X = np.vstack(feat_rows).astype(np.float32)
-                y_preds = self.model.predict(X)
-                return [self._build_prediction_result(float(p), model_used="tabpfn")
-                        for p in y_preds]
-            except Exception as e:
-                print(f"[Warning] batch TabPFN failed: {e}, falling back to per-sample")
+        # 主模型路径：逐条 predict。TabPFN 全量批量优化待后续实现
         return [self.predict(w, history=history) for w in water_samples]
 
     # ── 备用 ──
