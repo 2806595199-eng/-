@@ -15,7 +15,7 @@ services:
       ONLINE_HISTORY_DIR: "${ONLINE_HISTORY_DIR:-/app/data/online}"
       TABPFN_MODEL_CACHE_DIR: "${TABPFN_MODEL_CACHE_DIR:-/app/models/tabpfn_cache}"
       MODEL_DEVICE: "${MODEL_DEVICE:-cpu}"
-      USE_BACKUP: "${USE_BACKUP:-false}"
+      USE_BACKUP: "${USE_BACKUP:-false}"  # XGBoost粗筛 + TabPFN校验
       OMP_NUM_THREADS: "${CPU_THREADS:-4}"
       OPENBLAS_NUM_THREADS: "${CPU_THREADS:-4}"
       MKL_NUM_THREADS: "${CPU_THREADS:-4}"

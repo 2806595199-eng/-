@@ -227,7 +227,7 @@ class GridSearchDosingOptimizer:
         candidates, min_c, max_c = self._evaluate(water_quality, engine, history=history)
         flow = water_quality.get("influent_flow", 0)
 
-        # 全量 TabPFN 已对 1600 候选完成预测，直接从候选池按模式约束选最优
+        # XGBoost 从 1600 候选粗筛，TabPFN 对模式选出的候选校验
         risk_order = {"safe": 0, "warning": 1, "danger": 2}
 
         def _q95_ok(c, m):
@@ -235,25 +235,40 @@ class GridSearchDosingOptimizer:
             limit = cfg.TARGET_F if m == "safe" else cfg.LIMIT_F
             return q <= limit
 
-        # 三种模式分别从全量候选中选取
+        # XGBoost 分别按三种模式选取
         eco = self._select_economic(candidates)
         bal = self._select_balanced(candidates)
         saf = self._select_safe(candidates)
 
+        # TabPFN 对三个模式候选做完整特征工程校验
+        for sel in (eco, bal, saf):
+            wq_sel = {**water_quality,
+                      "pacl_dose": sel["recipe"].pacl_dose_setpoint,
+                      "defluor_dose": sel["recipe"].defluor_dose_setpoint}
+            tabpfn_pred = self._predict_validated(engine, wq_sel, history=history)
+            sel["prediction"] = {
+                "predicted_f": tabpfn_pred["predicted_f"],
+                "q05": tabpfn_pred["q05"],
+                "q95": tabpfn_pred["q95"],
+                "risk_level": tabpfn_pred["risk_level"],
+                "model_used": tabpfn_pred.get("model_used", "tabpfn"),
+            }
+            sel["model_used"] = tabpfn_pred.get("model_used", "tabpfn")
+
         mode_picks = {"economic": eco, "balanced": bal, "safe": saf}
         recommended = mode_picks[mode]
 
-        # 模式初选不满足约束时，从全量候选中重选
+        # TabPFN 校验后按约束重选
         if not _q95_ok(recommended, mode):
-            constrained = [c for c in candidates if _q95_ok(c, mode)]
+            constrained = [c for c in (eco, bal, saf) if _q95_ok(c, mode)]
             if constrained:
                 recommended = min(constrained, key=lambda c: c["cost"]["total_yuan_per_ton"])
             else:
-                recommended = min(candidates, key=lambda c: c["prediction"]["q95"])
+                recommended = min((eco, bal, saf), key=lambda c: c["prediction"]["q95"])
                 recommended.setdefault("warnings", []).append(
                     "所有候选方案均存在超标风险，建议人工介入")
 
-        # 风险管理：若推荐方案非 safe，检查其余模式选出的方案是否更好
+        # 风险管理
         rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
         if rec_risk > 0:
             for alt in (eco, bal, saf):
