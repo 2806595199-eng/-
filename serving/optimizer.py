@@ -227,14 +227,28 @@ class GridSearchDosingOptimizer:
         candidates, min_c, max_c = self._evaluate(water_quality, engine)
         flow = water_quality.get("influent_flow", 0)
 
-        # 三种模式分别选出最优
+        risk_order = {"safe": 0, "warning": 1, "danger": 2}
+
+        # 三种模式 XGBoost 初选
         eco = self._select_economic(candidates)
         bal = self._select_balanced(candidates)
         saf = self._select_safe(candidates)
 
-        # 用主模型（TabPFN）重新预测三个 XGBoost 初选候选，确保最终输出经过了主模型复核。
-        risk_order = {"safe": 0, "warning": 1, "danger": 2}
-        for sel in (eco, bal, saf):
+        # 收集 top N 候选：三种模式最优 + 成本最低 + q95 最低，去重
+        top_pool = {id(c): c for c in (eco, bal, saf)}
+        by_cost = sorted(candidates, key=lambda c: c["cost"]["total_yuan_per_ton"])
+        by_q95 = sorted(candidates, key=lambda c: c["prediction"]["q95"])
+        for c in by_cost[:cfg.TABPFN_VALIDATE_TOP_N // 2]:
+            top_pool[id(c)] = c
+        for c in by_q95[:cfg.TABPFN_VALIDATE_TOP_N // 2]:
+            top_pool[id(c)] = c
+        for c in top_pool.values():
+            c.setdefault("selection_reason", "top_n_candidate")
+            c.setdefault("warnings", [])
+        validated_pool = list(top_pool.values())
+
+        # 用主模型（TabPFN）验证 top N 候选，确保最终输出经过了主模型复核。
+        for sel in validated_pool:
             wq_sel = {**water_quality,
                       "pacl_dose": sel["recipe"].pacl_dose_setpoint,
                       "defluor_dose": sel["recipe"].defluor_dose_setpoint}
@@ -249,32 +263,31 @@ class GridSearchDosingOptimizer:
             }
             sel["model_used"] = validated_model
 
-        # TabPFN 验完后按模式约束重新选择：
-        # 按模式确定初选，然后用 TabPFN 验证后的 q95 复核约束
-        mode_map = {"economic": eco, "balanced": bal, "safe": saf}
-        recommended = mode_map[mode]
-        all_three = [eco, bal, saf]
-
+        # TabPFN 验完后从验证池按模式约束重新选择——不再信赖 XGBoost 初选
         def _q95_ok(c, m):
             q = c["prediction"]["q95"]
             limit = cfg.TARGET_F if m == "safe" else cfg.LIMIT_F
             return q <= limit
 
-        # 如果模式初选不满足约束，从所有备选中挑满足约束的最便宜方案
+        mode_picks = {"economic": eco, "balanced": bal, "safe": saf}
+        recommended = mode_picks[mode]
+
+        # 优先保留模式初选；仅当其不满足约束时从验证池中替换
         if not _q95_ok(recommended, mode):
-            candidates_ok = [c for c in all_three if _q95_ok(c, mode)]
-            if candidates_ok:
-                recommended = min(candidates_ok, key=lambda c: c["cost"]["total_yuan_per_ton"])
+            constrained = [c for c in validated_pool if _q95_ok(c, mode)]
+            if constrained:
+                recommended = min(constrained, key=lambda c: c["cost"]["total_yuan_per_ton"])
                 recommended["selection_reason"] += " (re-ranked, q95 ok)"
             else:
-                # 都不达标，挑 q95 最低的
-                recommended = min(all_three, key=lambda c: c["prediction"]["q95"])
+                recommended = min(validated_pool, key=lambda c: c["prediction"]["q95"])
                 recommended["selection_reason"] += " (all exceed, min q95)"
+        elif "selection_reason" not in recommended or not recommended.get("selection_reason"):
+            recommended["selection_reason"] = f"{mode}_selected"
 
-        # 风险优化：若推荐方案不达标或风险偏高，从备选中选更好的
+        # 风险优化：从完整验证池中找风险更低且更便宜的
         rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
         if rec_risk > 0:
-            for alt in all_three:
+            for alt in validated_pool:
                 if alt is recommended:
                     continue
                 alt_risk = risk_order.get(alt["prediction"]["risk_level"], 9)
