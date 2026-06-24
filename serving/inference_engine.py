@@ -201,11 +201,28 @@ class InferenceEngine:
                      residual_std_override=self.xgb_residual_std)
                     for p in preds]
 
-        # 主模型批量：XGBoost 特征 + TabPFN 预测，避免逐条重复特征工程
-        if len(water_samples) > 1 and self.model is not None:
+        # 主模型批量：对每个候选用完整特征工程（HRT延迟+时序+标准化），一次 predict
+        if len(water_samples) > 1 and self.model is not None and self.engineer is not None:
             try:
-                feats = np.array([self._build_simple_features(w, history) for w in water_samples])
-                y_preds = self.model.predict(feats.astype(np.float32))
+                feat_rows = []
+                horizon = self.engineer.prediction_horizon_steps()
+                window_rows = self.engineer.min_history * 2 + horizon
+                for wq in water_samples:
+                    # 复用历史上下文，用候选剂量替换当前行后构建特征
+                    if history is not None and len(history) > 0:
+                        new_row = pd.DataFrame([{**history.iloc[-1].to_dict(), **wq}])
+                        df = pd.concat([history, new_row], ignore_index=True)
+                    else:
+                        df = pd.DataFrame([wq])
+                    if horizon > 0:
+                        future = pd.DataFrame([wq] * horizon)
+                        df = pd.concat([df, future], ignore_index=True)
+                    df_feat = self.engineer.transform(df.iloc[-window_rows:])
+                    feat_rows.append(df_feat.iloc[[-1]].values)
+                X = np.vstack(feat_rows).astype(np.float32)
+                X = pd.DataFrame(X, columns=self.feature_names).reindex(
+                    columns=self.feature_names, fill_value=0).values
+                y_preds = self.model.predict(X)
                 return [self._build_prediction_result(float(p), model_used="tabpfn")
                         for p in y_preds]
             except Exception:

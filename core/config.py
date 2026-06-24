@@ -99,9 +99,9 @@ DEFLUOR_GRID_POINTS = 40
 TABPFN_VALIDATE_TOP_N = 30  # XGBoost 粗筛后 TabPFN 复核的候选数
 
 ALLOW_FALLBACK_PREDICTION = False   # True 时允许无 TabPFN 时用 XGBoost 或规则
-FAST_OPTIMIZER_MODEL = "xgboost"
-# "main"：优化用主模型，与 /predict 一致（40×40小时级延迟）
-# "xgboost"：优化用 XGBoost 批量预测，毫秒级（推荐默认）
+FAST_OPTIMIZER_MODEL = "main"
+# "main"：优化用主模型（TabPFN），全量网格一次批量特征工程后预测
+# "xgboost"：仅 USE_BACKUP=true 应急时使用
 
 # ═══════════════════════════════════════════════════════
 # 五、模型参数
