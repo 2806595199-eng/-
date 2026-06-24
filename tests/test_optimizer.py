@@ -59,6 +59,12 @@ class BackupValidationEngine(DistinctSafeEngine):
         result["model_used"] = "xgboost"
         return result
 
+    def predict_batch(self, samples, prefer_model=None, history=None):
+        results = super().predict_batch(samples, prefer_model, history)
+        for r in results:
+            r["model_used"] = "xgboost"
+        return results
+
 
 class FixedSelectionOptimizer(GridSearchDosingOptimizer):
     """隔离测试 optimize() 的最终推荐选择逻辑。"""

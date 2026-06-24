@@ -250,11 +250,11 @@ class InferenceEngine:
     def _build_simple_features(self, wq: dict, history=None) -> np.ndarray:
         """XGBoost 特征 — 顺序必须与 cfg.XGB_BASE_COLS 和训练阶段完全一致。
 
-        若传入 history，使用 HRT 延迟后的历史值构建特征，与训练口径对齐。
-        若没有 history，回退到当前值（优化器单候选调用场景）。
+        剂量列 (pacl_dose, defluor_dose) 使用候选值——表示"未来持续投加量"。
+        非剂量列使用 HRT 延迟后的历史值——表示"过去水质对当前出水的影响"。
+        这样才能区分1600个候选的药量差异，否则 XGBoost 粗筛无效。
         """
         eps = 1e-6
-        # 用 HRT 延迟后的值：从 history 中取 delay_steps 前的那一行
         def _hrt_val(col, default):
             delay = self.engineer.feature_delay_steps.get(col, 0) if self.engineer else 0
             if history is not None and len(history) > delay:
@@ -263,22 +263,24 @@ class InferenceEngine:
                     return float(val)
             return wq.get(col, default)
 
+        # 候选剂量 + 非剂量列的 HRT 延迟历史值
+        pacl = wq.get("pacl_dose", 0.0)
+        deflu = wq.get("defluor_dose", 0.0)
         flow = _hrt_val("influent_flow", 100.0)
-        inf_flow = _hrt_val("influent_flow", 100.0)
         return np.array([
             flow,
             _hrt_val("influent_ph", 7.0),
             _hrt_val("conductivity", 6500.0),
             _hrt_val("influent_f", 18.0),
-            _hrt_val("pacl_dose", 0.0),
-            _hrt_val("defluor_dose", 0.0),
+            pacl,                                                # ← 候选当前值
+            deflu,                                               # ← 候选当前值
             _hrt_val("pacl_tank_ph", 7.0),
             _hrt_val("defluor_tank_ph", 6.0),
             _hrt_val("recycle_flow", 0.0),
             _hrt_val("waste_flow", 0.0),
             _hrt_val("pam_dose", 0.0),
-            _hrt_val("recycle_flow", 0.0) / max(inf_flow, eps),
-            _hrt_val("waste_flow", 0.0) / max(inf_flow, eps),
-            _hrt_val("pacl_dose", 0.0) * inf_flow,
-            _hrt_val("defluor_dose", 0.0) * inf_flow,
+            _hrt_val("recycle_flow", 0.0) / max(flow, eps),
+            _hrt_val("waste_flow", 0.0) / max(flow, eps),
+            pacl * flow,                                         # ← 候选剂量 × 流量
+            deflu * flow,                                        # ← 候选剂量 × 流量
         ], dtype=np.float32)
