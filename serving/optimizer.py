@@ -227,58 +227,59 @@ class GridSearchDosingOptimizer:
         candidates, min_c, max_c = self._evaluate(water_quality, engine, history=history)
         flow = water_quality.get("influent_flow", 0)
 
-        # XGBoost 从 1600 候选粗筛，TabPFN 对模式选出的候选校验
-        risk_order = {"safe": 0, "warning": 1, "danger": 2}
+        # XGBoost 粗筛 → TabPFN 逐个校验，直到找到达标的就执行
+        limit = cfg.TARGET_F if mode == "safe" else cfg.LIMIT_F
 
-        def _q95_ok(c, m):
-            q = c["prediction"]["q95"]
-            limit = cfg.TARGET_F if m == "safe" else cfg.LIMIT_F
-            return q <= limit
+        def _validate_one(c):
+            wq_sel = {**water_quality,
+                      "pacl_dose": c["recipe"].pacl_dose_setpoint,
+                      "defluor_dose": c["recipe"].defluor_dose_setpoint}
+            pred = self._predict_validated(engine, wq_sel, history=history)
+            c["prediction"] = {
+                "predicted_f": pred["predicted_f"],
+                "q05": pred["q05"],
+                "q95": pred["q95"],
+                "risk_level": pred["risk_level"],
+                "model_used": pred.get("model_used", "tabpfn"),
+            }
+            c["model_used"] = pred.get("model_used", "tabpfn")
+            return c["prediction"]["q95"] <= limit
 
-        # XGBoost 分别按三种模式选取
+        # 优先校验模式初选候选，不通过则依次校验同约束下其他候选
         eco = self._select_economic(candidates)
         bal = self._select_balanced(candidates)
         saf = self._select_safe(candidates)
-
-        # TabPFN 对三个模式候选做完整特征工程校验
-        for sel in (eco, bal, saf):
-            wq_sel = {**water_quality,
-                      "pacl_dose": sel["recipe"].pacl_dose_setpoint,
-                      "defluor_dose": sel["recipe"].defluor_dose_setpoint}
-            tabpfn_pred = self._predict_validated(engine, wq_sel, history=history)
-            sel["prediction"] = {
-                "predicted_f": tabpfn_pred["predicted_f"],
-                "q05": tabpfn_pred["q05"],
-                "q95": tabpfn_pred["q95"],
-                "risk_level": tabpfn_pred["risk_level"],
-                "model_used": tabpfn_pred.get("model_used", "tabpfn"),
-            }
-            sel["model_used"] = tabpfn_pred.get("model_used", "tabpfn")
-
         mode_picks = {"economic": eco, "balanced": bal, "safe": saf}
-        recommended = mode_picks[mode]
+        first_pick = mode_picks[mode]
 
-        # TabPFN 校验后按约束重选
-        if not _q95_ok(recommended, mode):
-            constrained = [c for c in (eco, bal, saf) if _q95_ok(c, mode)]
-            if constrained:
-                recommended = min(constrained, key=lambda c: c["cost"]["total_yuan_per_ton"])
-            else:
-                recommended = min((eco, bal, saf), key=lambda c: c["prediction"]["q95"])
-                recommended.setdefault("warnings", []).append(
-                    "所有候选方案均存在超标风险，建议人工介入")
+        # 模式约束下按成本排序的候选列表（用于回退）
+        constrained_pool = sorted(
+            [c for c in candidates if c["prediction"]["q95"] <= limit],
+            key=lambda c: c["cost"]["total_yuan_per_ton"])
+        if not constrained_pool:
+            constrained_pool = sorted(candidates, key=lambda c: c["prediction"]["q95"])
 
-        # 风险管理
-        rec_risk = risk_order.get(recommended["prediction"]["risk_level"], 9)
-        if rec_risk > 0:
-            for alt in (eco, bal, saf):
-                if alt is recommended:
+        MAX_VALIDATE = 5
+        recommended = None
+
+        # 先验模式初选
+        if _validate_one(first_pick):
+            recommended = first_pick
+        else:
+            # 初选不通过，从约束池逐个找
+            for c in constrained_pool[:MAX_VALIDATE]:
+                if c is first_pick:
                     continue
-                alt_risk = risk_order.get(alt["prediction"]["risk_level"], 9)
-                if alt_risk < rec_risk or (alt_risk == rec_risk and
-                   alt["cost"]["total_yuan_per_ton"] < recommended["cost"]["total_yuan_per_ton"]):
-                    rec_risk = alt_risk
-                    recommended = alt
+                if _validate_one(c):
+                    recommended = c
+                    break
+
+        if recommended is None:
+            # 全不达标：选约束池中 TabPFN q95 最低的自动执行
+            recommended = min(constrained_pool[:MAX_VALIDATE],
+                              key=lambda c: c["prediction"]["q95"])
+            recommended.setdefault("warnings", []).append(
+                "TabPFN 校验后无可完全达标方案，已选 q95 最低候选自动执行")
 
         # 构造统一输出
         def _format(c, label):
