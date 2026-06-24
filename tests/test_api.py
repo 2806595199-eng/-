@@ -25,7 +25,7 @@ class FakeEngine:
         return {"predicted_f": 0.5, "q05": 0.3, "q95": 0.7,
                 "risk_level": "safe", "model_used": "tabpfn", "warnings": []}
 
-    def predict_batch(self, samples, prefer_model=None):
+    def predict_batch(self, samples, prefer_model=None, history=None):
         return [self.predict(s) for s in samples]
 
 

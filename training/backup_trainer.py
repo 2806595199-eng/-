@@ -81,6 +81,7 @@ def train_xgboost(X_train, y_train, X_test, y_test,
     except ImportError:
         return _train_sklearn_backup(X_train, y_train, X_test, y_test, seed=seed)
 
+    from sklearn.model_selection import TimeSeriesSplit
     t0 = time.time()
 
     # 网格搜索空间：3×3×3=27，比随机搜索快且可控
@@ -91,29 +92,33 @@ def train_xgboost(X_train, y_train, X_test, y_test,
         for n in [50, 100, 200]
     ]
 
+    # 用训练集内部 TimeSeriesSplit 选参数，避免测试集泄漏
     best_mdl = None
     best_score = float("inf")
     best_params = None
-    X_ts = X_test.values.astype(np.float32)
-    y_ts = y_test.values.astype(np.float32)
+    X_tr = X_train.values.astype(np.float32)
+    y_tr = y_train.values.astype(np.float32)
+    tscv = TimeSeriesSplit(n_splits=3)
 
-    for i, params in enumerate(param_grid):
-        mdl = xgb.XGBRegressor(
-            **params,
-            random_state=seed,
-            verbosity=0,
-            n_jobs=1,
-        )
-        mdl.fit(X_train.values.astype(np.float32), y_train.values.astype(np.float32))
-        yp = mdl.predict(X_ts)
-        mape = mean_absolute_percentage_error(y_ts, yp)
-
-        if mape < best_score:
-            best_score = mape
-            best_mdl = mdl
+    for params in param_grid:
+        scores = []
+        for fold_train_idx, fold_val_idx in tscv.split(X_tr):
+            mdl = xgb.XGBRegressor(**params, random_state=seed, verbosity=0, n_jobs=1)
+            mdl.fit(X_tr[fold_train_idx], y_tr[fold_train_idx])
+            yp = mdl.predict(X_tr[fold_val_idx])
+            scores.append(mean_absolute_percentage_error(y_tr[fold_val_idx], yp))
+        avg_mape = float(np.mean(scores))
+        if avg_mape < best_score:
+            best_score = avg_mape
             best_params = params
 
-    # 评估
+    # 用最优参数在全量训练集上训练
+    best_mdl = xgb.XGBRegressor(**best_params, random_state=seed, verbosity=0, n_jobs=1)
+    best_mdl.fit(X_tr, y_tr)
+
+    # 用测试集做最终评估（仅一次）
+    X_ts = X_test.values.astype(np.float32)
+    y_ts = y_test.values.astype(np.float32)
     yp = best_mdl.predict(X_ts)
     mape = mean_absolute_percentage_error(y_ts, yp)
     r2 = r2_score(y_ts, yp)

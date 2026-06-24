@@ -130,6 +130,7 @@ def main(data_path=None, device=None, output_dir="models"):
     assert len(xgb_train) == len(y_tr), f"XGB train size mismatch: {len(xgb_train)} vs {len(y_tr)}"
     assert len(xgb_test) == len(y_te), f"XGB test size mismatch: {len(xgb_test)} vs {len(y_te)}"
     xgb_res = train_xgboost(xgb_train, y_tr, xgb_test, y_te, seed=cfg.RANDOM_SEED)
+    xgb_residual_std = xgb_res.get("rmse", 0.12)  # XGBoost 自有误差分布
     save_backup_model(xgb_res["model"], xgb_res["importance"], output_dir)
 
     print("[6/6] Export...")
@@ -159,6 +160,7 @@ def main(data_path=None, device=None, output_dir="models"):
         "xgb_r2": xgb_res["r2"],
         "xgb_rmse": xgb_res["rmse"],
         "xgb_mape": xgb_res["mape"],
+        "xgb_residual_std": xgb_residual_std,
         "xgb_model_type": xgb_res.get("best_params", {}).get("model_type", "XGBRegressor"),
     })
     export(output_dir, eng.scaler, eng, meta)
@@ -180,6 +182,7 @@ def main(data_path=None, device=None, output_dir="models"):
         "xgb_r2": xgb_res["r2"],
         "xgb_rmse": xgb_res["rmse"],
         "xgb_mape": xgb_res["mape"],
+        "xgb_residual_std": xgb_residual_std,
         "output_dir": output_dir,
     }
 

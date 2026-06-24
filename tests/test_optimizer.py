@@ -12,7 +12,7 @@ class FakeEngine:
         return {"predicted_f": 0.5, "q05": 0.3, "q95": 0.7,
                 "risk_level": "safe", "model_used": "tabpfn", "warnings": []}
 
-    def predict_batch(self, samples, prefer_model=None):
+    def predict_batch(self, samples, prefer_model=None, history=None):
         results = []
         for s in samples:
             pacl = s["pacl_dose"]
@@ -41,7 +41,7 @@ class DistinctSafeEngine:
         return {"predicted_f": q95 - 0.1, "q05": q95 - 0.2, "q95": q95,
                 "risk_level": "safe", "model_used": "tabpfn", "warnings": []}
 
-    def predict_batch(self, samples, prefer_model=None):
+    def predict_batch(self, samples, prefer_model=None, history=None):
         results = []
         for s in samples:
             pacl = s["pacl_dose"]
@@ -63,7 +63,7 @@ class BackupValidationEngine(DistinctSafeEngine):
 class FixedSelectionOptimizer(GridSearchDosingOptimizer):
     """隔离测试 optimize() 的最终推荐选择逻辑。"""
 
-    def _evaluate(self, water_quality, engine):
+    def _evaluate(self, water_quality, engine, history=None):
         def candidate(pacl, defluor, cost):
             recipe = DosingRecipe(pacl_dose_setpoint=pacl,
                                   defluor_dose_setpoint=defluor)

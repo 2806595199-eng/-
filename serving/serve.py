@@ -223,18 +223,29 @@ def _do_batch_compute(records: list, mode: str) -> dict:
     opt = _run_optimizer(current, mode=mode, history=history)
     elapsed = round(time.time() - t0, 3)
     rec = opt["recommended"]
-    predicted_f = rec["predicted_f"]
-    risk = _compute_risk(predicted_f)
+    # 使用优化器内 TabPFN 验证后的 q95 风险判定，而非基于均值的二次计算
+    cur_pacl = current.get("pacl_dose", rec["pacl_dose_setpoint"])
+    cur_deflu = current.get("defluor_dose", rec["defluor_dose_setpoint"])
+    pacl_jump = abs(rec["pacl_dose_setpoint"] - cur_pacl) / max(cur_pacl, 1e-6)
+    deflu_jump = abs(rec["defluor_dose_setpoint"] - cur_deflu) / max(cur_deflu, 1e-6)
+    warnings = rec.get("warnings", [])[:]
+    if pacl_jump > 0.5 or deflu_jump > 0.5:
+        warnings.append(
+            f"剂量跳变较大（PACl: {pacl_jump:.0%}, 除氟剂: {deflu_jump:.0%}），建议确认执行")
+    if rec.get("risk_level") == "danger":
+        warnings.append("所有候选方案均存在超标风险，建议人工介入")
+
     return {
         "pacl_dose_setpoint": rec["pacl_dose_setpoint"],
         "defluor_dose_setpoint": rec["defluor_dose_setpoint"],
-        "predicted_f": predicted_f,
-        "risk_level": risk,
+        "predicted_f": rec["predicted_f"],
+        "risk_level": rec["risk_level"],
         "effluent_limit": cfg.LIMIT_F,
-        "safety_margin": round(cfg.LIMIT_F - predicted_f, 3),
+        "safety_margin": round(cfg.LIMIT_F - rec["predicted_f"], 3),
         "mode": mode,
         "based_on_records": len(records),
         "elapsed_s": elapsed,
+        "warnings": warnings,
     }
 
 

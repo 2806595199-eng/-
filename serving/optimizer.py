@@ -47,7 +47,7 @@ class GridSearchDosingOptimizer:
     # 评估
     # ═══════════════════════════════════════════════════
 
-    def _evaluate(self, water_quality: dict, engine) -> list:
+    def _evaluate(self, water_quality: dict, engine, history=None) -> list:
         """对每个候选批量预测 + 成本计算。
 
         默认先用 XGBoost 快速评估全部候选；这一步用于找方向，不作为最终精度保证。
@@ -56,7 +56,7 @@ class GridSearchDosingOptimizer:
         flow = water_quality.get("influent_flow", 0)
 
         if hasattr(engine, 'predict_batch'):
-            predictions = engine.predict_batch(samples, prefer_model=cfg.FAST_OPTIMIZER_MODEL)
+            predictions = engine.predict_batch(samples, prefer_model=cfg.FAST_OPTIMIZER_MODEL, history=history)
         else:
             predictions = [engine.predict(w) for w in samples]
 
@@ -224,7 +224,7 @@ class GridSearchDosingOptimizer:
         Returns:
             dict with recommended, alternatives, pareto_front, warnings, assumptions
         """
-        candidates, min_c, max_c = self._evaluate(water_quality, engine)
+        candidates, min_c, max_c = self._evaluate(water_quality, engine, history=history)
         flow = water_quality.get("influent_flow", 0)
 
         risk_order = {"safe": 0, "warning": 1, "danger": 2}

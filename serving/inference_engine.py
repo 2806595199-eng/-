@@ -42,6 +42,7 @@ class InferenceEngine:
         self.feature_names = []
         self.version = "0.0.0"
         self.residual_std = 0.12
+        self.xgb_residual_std = 0.12
         self.main_model_fitted = False
         self.start_time = None
 
@@ -73,6 +74,7 @@ class InferenceEngine:
             meta = me.load_metadata(str(meta_path))
             self.version = str(meta.get("r2_test", "0.0.0"))
             self.residual_std = meta.get("residual_std", 0.12) or 0.12
+            self.xgb_residual_std = meta.get("xgb_residual_std", 0.12) or 0.12
         active_model = read_active_model(self.models_root)
         if active_model and active_model.get("active_version"):
             self.version = str(active_model["active_version"])
@@ -112,19 +114,22 @@ class InferenceEngine:
     # ── 预测 ──
 
     def _build_prediction_result(self, predicted: float, model_used="tabpfn",
-                                 warnings=None, low_confidence=False) -> dict:
+                                 warnings=None, low_confidence=False,
+                                 residual_std_override=None) -> dict:
         """统一构造预测结果。
 
         q95 是偏保守的上置信界；推荐逻辑主要看 q95 是否超过安全线/红线。
+        residual_std_override: 若指定则使用该值（XGBoost 使用自己的误差分布）
         """
-        raw_q95 = predicted + 1.645 * self.residual_std
+        std = residual_std_override if residual_std_override is not None else self.residual_std
+        raw_q95 = predicted + 1.645 * std
         if raw_q95 < 0.8:
             risk = RiskLevel.SAFE
         elif raw_q95 < cfg.LIMIT_F:
             risk = RiskLevel.WARNING
         else:
             risk = RiskLevel.DANGER
-        std_final = self.residual_std * 2 if risk == RiskLevel.DANGER else self.residual_std
+        std_final = std * 2 if risk == RiskLevel.DANGER else std
         result = {
             "predicted_f": round(predicted, 4),
             "q05": max(0, predicted - 1.645 * std_final),
@@ -178,26 +183,28 @@ class InferenceEngine:
                 return self._fallback_rule(water_quality)
             raise RuntimeError(f"预测失败: {e}") from e
 
-    def predict_batch(self, water_samples: list, prefer_model=None) -> list:
+    def predict_batch(self, water_samples: list, prefer_model=None, history=None) -> list:
         """批量预测。默认与 predict() 一致，prefer_model="xgboost" 可切换。
 
         加药优化会产生大量候选组合，逐个跑 TabPFN 会很慢；
         因此默认用 XGBoost 快速粗筛，最终推荐前再由优化器调用主模型复核。
         prefer_model 为 None 时使用 FAST_OPTIMIZER_MODEL 配置。
+        history 为历史水质 DataFrame，用于构建与训练一致的 HRT 延迟特征。
         """
         if prefer_model is None:
             prefer_model = cfg.FAST_OPTIMIZER_MODEL
 
         if prefer_model == "xgboost" and self.backup_model is not None:
-            feats = np.array([self._build_simple_features(w) for w in water_samples])
+            feats = np.array([self._build_simple_features(w, history) for w in water_samples])
             preds = self.backup_model.predict(feats)
-            return [self._build_prediction_result(float(p), model_used="xgboost")
+            return [self._build_prediction_result(float(p), model_used="xgboost",
+                     residual_std_override=self.xgb_residual_std)
                     for p in preds]
 
         # 主模型批量：XGBoost 特征 + TabPFN 预测，避免逐条重复特征工程
         if len(water_samples) > 1 and self.model is not None:
             try:
-                feats = np.array([self._build_simple_features(w) for w in water_samples])
+                feats = np.array([self._build_simple_features(w, history) for w in water_samples])
                 y_preds = self.model.predict(feats.astype(np.float32))
                 return [self._build_prediction_result(float(p), model_used="tabpfn")
                         for p in y_preds]
@@ -210,7 +217,8 @@ class InferenceEngine:
     def _xgb_predict_result(self, wq: dict, warnings=None) -> dict:
         pred = float(self.backup_model.predict([self._build_simple_features(wq)])[0])
         return self._build_prediction_result(pred, model_used="xgboost",
-                                             warnings=warnings)
+                                             warnings=warnings,
+                                             residual_std_override=self.xgb_residual_std)
 
     def _fallback_rule(self, wq: dict) -> dict:
         f_in = wq.get("influent_f", 18)
@@ -218,24 +226,38 @@ class InferenceEngine:
         return self._build_prediction_result(rough, model_used="fallback_rule",
             warnings=["当前结果来自规则估算，不应用作正式推荐"])
 
-    def _build_simple_features(self, wq: dict) -> np.ndarray:
-        """XGBoost 简单特征 — 顺序必须与 cfg.XGB_BASE_COLS 和训练阶段完全一致。"""
+    def _build_simple_features(self, wq: dict, history=None) -> np.ndarray:
+        """XGBoost 特征 — 顺序必须与 cfg.XGB_BASE_COLS 和训练阶段完全一致。
+
+        若传入 history，使用 HRT 延迟后的历史值构建特征，与训练口径对齐。
+        若没有 history，回退到当前值（优化器单候选调用场景）。
+        """
         eps = 1e-6
-        flow = wq.get("influent_flow", 100.0)
+        # 用 HRT 延迟后的值：从 history 中取 delay_steps 前的那一行
+        def _hrt_val(col, default):
+            delay = self.engineer.feature_delay_steps.get(col, 0) if self.engineer else 0
+            if history is not None and len(history) > delay:
+                val = history[col].iloc[-(delay + 1)]
+                if pd.notna(val):
+                    return float(val)
+            return wq.get(col, default)
+
+        flow = _hrt_val("influent_flow", 100.0)
+        inf_flow = _hrt_val("influent_flow", 100.0)
         return np.array([
             flow,
-            wq.get("influent_ph", 7.0),
-            wq.get("conductivity", 6500.0),
-            wq.get("influent_f", 18.0),
-            wq.get("pacl_dose", 0.0),
-            wq.get("defluor_dose", 0.0),
-            wq.get("pacl_tank_ph", 7.0),
-            wq.get("defluor_tank_ph", 6.0),
-            wq.get("recycle_flow", 0.0),
-            wq.get("waste_flow", 0.0),
-            wq.get("pam_dose", 0.0),
-            wq.get("recycle_flow", 0.0) / max(flow, eps),
-            wq.get("waste_flow", 0.0) / max(flow, eps),
-            wq.get("pacl_dose", 0.0) * flow,
-            wq.get("defluor_dose", 0.0) * flow,
+            _hrt_val("influent_ph", 7.0),
+            _hrt_val("conductivity", 6500.0),
+            _hrt_val("influent_f", 18.0),
+            _hrt_val("pacl_dose", 0.0),
+            _hrt_val("defluor_dose", 0.0),
+            _hrt_val("pacl_tank_ph", 7.0),
+            _hrt_val("defluor_tank_ph", 6.0),
+            _hrt_val("recycle_flow", 0.0),
+            _hrt_val("waste_flow", 0.0),
+            _hrt_val("pam_dose", 0.0),
+            _hrt_val("recycle_flow", 0.0) / max(inf_flow, eps),
+            _hrt_val("waste_flow", 0.0) / max(inf_flow, eps),
+            _hrt_val("pacl_dose", 0.0) * inf_flow,
+            _hrt_val("defluor_dose", 0.0) * inf_flow,
         ], dtype=np.float32)
