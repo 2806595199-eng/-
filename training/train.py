@@ -112,10 +112,22 @@ def main(data_path=None, device=None, output_dir="models"):
         cv = {"cv_r2_mean": 0, "cv_r2_std": 0}
 
     print("[5/6] XGBoost backup...")
-    # XGBoost 使用与 TabPFN 完全相同的 210 维特征工程（含 lag/rolling/HRT 延迟）
-    xgb_train, xgb_test = X_tr, X_te
-    assert len(xgb_train) == len(y_tr)
-    assert len(xgb_test) == len(y_te)
+    # XGBoost 用 15 维简单特征做快速粗筛，不需时序特征
+    base_cols = cfg.XGB_BASE_COLS
+    xgb_eng = FeatureEngineer(
+        lag_steps=(),
+        rolling_windows=(),
+        min_history=cfg.MIN_HISTORY,
+        feature_delay_steps=cfg.FEATURE_DELAY_STEPS,
+    )
+    df_xgb = xgb_eng._build(df, feat_cols=cfg.TS_FEAT_COLS)
+    xgb_fill_values = df_xgb.iloc[:len(X_tr)].median().fillna(0.0).to_dict()
+    df_xgb = df_xgb.fillna(xgb_fill_values).fillna(0.0)
+    available = [c for c in base_cols if c in df_xgb.columns]
+    xgb_train = df_xgb.iloc[:len(X_tr)][available]
+    xgb_test = df_xgb.iloc[len(X_tr):len(X_tr) + len(X_te)][available]
+    assert len(xgb_train) == len(y_tr), f"XGB train size mismatch: {len(xgb_train)} vs {len(y_tr)}"
+    assert len(xgb_test) == len(y_te), f"XGB test size mismatch: {len(xgb_test)} vs {len(y_te)}"
     xgb_res = train_xgboost(xgb_train, y_tr, xgb_test, y_te, seed=cfg.RANDOM_SEED)
     xgb_residual_std = xgb_res.get("rmse", 0.12)  # XGBoost 自有误差分布
     save_backup_model(xgb_res["model"], xgb_res["importance"], output_dir)
@@ -139,7 +151,7 @@ def main(data_path=None, device=None, output_dir="models"):
         else "backup_only",
         "model_input_cols": cfg.MODEL_INPUT_COLS,
         "target_col": cfg.TARGET_COL,
-        "xgb_feature_cols": list(xgb_train.columns),
+        "xgb_feature_cols": available,
         "influent_flow_mean": float(df_train["influent_flow"].mean()),
         "influent_ph_mean": float(df_train["influent_ph"].mean()),
         "conductivity_mean": float(df_train["conductivity"].mean()),

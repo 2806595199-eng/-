@@ -195,60 +195,13 @@ class InferenceEngine:
             prefer_model = cfg.FAST_OPTIMIZER_MODEL
 
         if prefer_model == "xgboost" and self.backup_model is not None:
-            # XGBoost 与 TabPFN 使用同一套特征工程（210 维，含 HRT/ lag/ rolling）
-            # 对每个候选构造 history + horizon 窗口，提取最后一行特征
-            if history is not None and len(history) > 0 and self.engineer is not None:
-                try:
-                    horizon = self.engineer.prediction_horizon_steps()
-                    win = self.engineer.min_history * 2 + horizon
-                    feats = []
-                    for wq in water_samples:
-                        horizon_rows = pd.DataFrame([wq] * (horizon + 1))
-                        df_win = pd.concat([history, horizon_rows], ignore_index=True)
-                        feat_df = self.engineer.transform(df_win.iloc[-win:])
-                        feats.append(feat_df.iloc[-1].values)
-                    X = np.vstack(feats).astype(np.float32)
-                    preds = self.backup_model.predict(X)
-                except Exception:
-                    feats = np.array([self._build_simple_features(w) for w in water_samples])
-                    preds = self.backup_model.predict(feats)
-            else:
-                feats = np.array([self._build_simple_features(w) for w in water_samples])
-                preds = self.backup_model.predict(feats)
+            feats = np.array([self._build_simple_features(w, history) for w in water_samples])
+            preds = self.backup_model.predict(feats)
             return [self._build_prediction_result(float(p), model_used="xgboost",
                      residual_std_override=self.xgb_residual_std)
                     for p in preds]
 
-        # 主模型批量：历史部分的特征预建一次，每个候选只追加自己的 horizon 行
-        if (len(water_samples) > 1 and self.model is not None
-            and self.engineer is not None and history is not None and len(history) > 0):
-            try:
-                horizon = self.engineer.prediction_horizon_steps()
-                win = self.engineer.min_history * 2 + horizon
-
-                # Step 1: 预建历史特征矩阵（不含 horizon，不含候选人）
-                # 给 transform 传入 history，它内部会调用 _build + fillna + scaler
-                hist_feat = self.engineer.transform(history)
-                # 只保留最后 win - (horizon+1) 行作为历史锚点（实际需要的窗口行数取决于 horizon 大小）
-                keep_rows = min(len(hist_feat), self.engineer.min_history)
-                hist_anchor = hist_feat.iloc[-keep_rows:].values  # (keep_rows, 210)
-
-                # Step 2: 为每个候选追加 horizon 行，与预建的特征历史拼接
-                # 候选行 = [history原始行 + horizon个候选行]，取最后 win 行
-                feat_rows = []
-                for wq in water_samples:
-                    new_rows = pd.DataFrame([wq] * (horizon + 1))
-                    full_df = pd.concat([history, new_rows], ignore_index=True)
-                    # 只对新行做 _build + fillna + scaler（利用预建特征）
-                    candidate_feat = self.engineer.transform(full_df.iloc[-win:])
-                    feat_rows.append(candidate_feat.iloc[-1].values)
-
-                X = np.vstack(feat_rows).astype(np.float32)
-                y_preds = self.model.predict(X)
-                return [self._build_prediction_result(float(p), model_used="tabpfn")
-                        for p in y_preds]
-            except Exception as e:
-                print(f"[Warning] batch TabPFN failed: {e}, falling back to per-sample")
+        # 主模型：逐个 predict。批量优化（历史特征一次+拼差异列）待后续实现
         return [self.predict(w, history=history) for w in water_samples]
 
     # ── 备用 ──
