@@ -234,7 +234,7 @@ class GridSearchDosingOptimizer:
         mode_picks = {"economic": eco, "balanced": bal, "safe": saf}
 
         limit = cfg.TARGET_F if mode == "safe" else cfg.LIMIT_F
-        MAX_VALIDATE = 5
+        MAX_VALIDATE = 15
 
         # 收集校验池：模式初选 + 约束池 Top-N（去重）
         constrained_pool = sorted(
