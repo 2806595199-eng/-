@@ -195,8 +195,26 @@ class InferenceEngine:
             prefer_model = cfg.FAST_OPTIMIZER_MODEL
 
         if prefer_model == "xgboost" and self.backup_model is not None:
-            feats = np.array([self._build_simple_features(w, history) for w in water_samples])
-            preds = self.backup_model.predict(feats)
+            # XGBoost 与 TabPFN 使用同一套特征工程（210 维，含 HRT/ lag/ rolling）
+            # 对每个候选构造 history + horizon 窗口，提取最后一行特征
+            if history is not None and len(history) > 0 and self.engineer is not None:
+                try:
+                    horizon = self.engineer.prediction_horizon_steps()
+                    win = self.engineer.min_history * 2 + horizon
+                    feats = []
+                    for wq in water_samples:
+                        horizon_rows = pd.DataFrame([wq] * (horizon + 1))
+                        df_win = pd.concat([history, horizon_rows], ignore_index=True)
+                        feat_df = self.engineer.transform(df_win.iloc[-win:])
+                        feats.append(feat_df.iloc[-1].values)
+                    X = np.vstack(feats).astype(np.float32)
+                    preds = self.backup_model.predict(X)
+                except Exception:
+                    feats = np.array([self._build_simple_features(w) for w in water_samples])
+                    preds = self.backup_model.predict(feats)
+            else:
+                feats = np.array([self._build_simple_features(w) for w in water_samples])
+                preds = self.backup_model.predict(feats)
             return [self._build_prediction_result(float(p), model_used="xgboost",
                      residual_std_override=self.xgb_residual_std)
                     for p in preds]
